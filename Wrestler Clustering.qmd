@@ -1,0 +1,504 @@
+---
+title: "Homework 3"
+author: "Chance Van Dyke"
+format:
+  html:
+    toc: true
+    toc-location: left
+    self-contained: true
+---
+
+```{r, echo=FALSE}
+library(httr2)
+library(jsonlite)
+library(rvest)
+library(lubridate)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(cluster) 
+library(ggdark)
+library(ggplot2)
+```
+
+You've got text, ratings, and any other information available to you from the cagematch site. Perform any type of model and report your results.
+
+cores!!!
+```{r}
+library(future)
+plan(multisession, workers = parallel::detectCores() - 1)
+```
+
+
+top1000
+```{r}
+# Unique Urls for each fighter
+
+TopWrestlers <- url("https://www.cagematch.net/?id=2&view=statistics&page=22")
+
+TopWrestlers <- read_html(TopWrestlers) %>%
+  html_table(header = TRUE) %>%
+  `[[`(1)
+
+TopWrestlers$wrestler_number <- 0
+
+TopWrestlers$wrestler_number <- read_html(url("https://www.cagematch.net/?id=2&view=statistics&page=22")) %>%
+  html_elements(("a[href*='?id=2&nr=']")) %>%
+  html_attr("href")
+
+TopWrestlers$wrestler_number <- str_extract(TopWrestlers$wrestler_number, "(?<=nr=)\\d+")
+
+urls <- glue::glue("https://www.cagematch.net/?id=2&nr={TopWrestlers$wrestler_number}&page=22")
+
+#Mine
+
+GetPages2 <- function(urls) {
+  urlw <- url(urls)
+  Wrestlers <- read_html(urlw)
+  Wrestlers <- html_elements(Wrestlers, ".InformationBoxContents")
+  Wrestlers <-html_text(Wrestlers, ".InformationBoxContents")
+  return (as.data.frame(t(Wrestlers)))
+}
+
+Fighters <- lapply(urls, GetPages2)
+WrestlersTable <- do.call (rbind, Fighters)
+colnames(WrestlersTable) <- c("Matches", "Wins", "Loss", "Draw")
+WrestlersTable$Wins <- gsub(" .*","",(WrestlersTable$Wins))
+WrestlersTable$Loss <- gsub(" .*","",(WrestlersTable$Loss))
+WrestlersTable$Draw <- gsub(" .*","",(WrestlersTable$Draw))
+
+WrestlersTable$Matches <- as.numeric(WrestlersTable$Matches)
+WrestlersTable$Wins <- as.numeric(WrestlersTable$Wins)
+WrestlersTable$Loss <- as.numeric(WrestlersTable$Loss)
+WrestlersTable$Draw <- as.numeric(WrestlersTable$Draw)
+WinsLoss <- cbind(TopWrestlers, WrestlersTable)
+WinsLoss = subset(WinsLoss, select = -c(1,4,5,6,9))
+
+head(WinsLoss)
+
+```
+
+
+bottom50
+```{r}
+# Unique Urls for each fighter
+
+TopWrestlers <- url("https://www.cagematch.net/?id=2&view=statistics&page=2")
+
+TopWrestlers <- read_html(TopWrestlers) %>%
+  html_table(header = TRUE) %>%
+  `[[`(1)
+
+TopWrestlers$wrestler_number <- 0
+
+TopWrestlers$wrestler_number <- read_html(url("https://www.cagematch.net/?id=2&view=statistics&page=2")) %>%
+  html_elements(("a[href*='?id=2&nr=']")) %>%
+  html_attr("href")
+
+TopWrestlers$wrestler_number <- str_extract(TopWrestlers$wrestler_number, "(?<=nr=)\\d+")
+
+urls <- glue::glue("https://www.cagematch.net/?id=2&nr={TopWrestlers$wrestler_number}&page=22")
+
+#Mine
+
+GetPages2 <- function(urls) {
+  urlw <- url(urls)
+  Wrestlers <- read_html(urlw)
+  Wrestlers <- html_elements(Wrestlers, ".InformationBoxContents")
+  Wrestlers <-html_text(Wrestlers, ".InformationBoxContents")
+  return (as.data.frame(t(Wrestlers)))
+}
+
+Fighters2 <- lapply(urls, GetPages2)
+WrestlersTable <- do.call (rbind, Fighters2)
+colnames(WrestlersTable) <- c("Matches", "Wins", "Loss", "Draw")
+WrestlersTable$Wins <- gsub(" .*","",(WrestlersTable$Wins))
+WrestlersTable$Loss <- gsub(" .*","",(WrestlersTable$Loss))
+WrestlersTable$Draw <- gsub(" .*","",(WrestlersTable$Draw))
+
+WrestlersTable$Matches <- as.numeric(WrestlersTable$Matches)
+WrestlersTable$Wins <- as.numeric(WrestlersTable$Wins)
+WrestlersTable$Loss <- as.numeric(WrestlersTable$Loss)
+WrestlersTable$Draw <- as.numeric(WrestlersTable$Draw)
+WinsLoss2 <- cbind(TopWrestlers, WrestlersTable)
+WinsLoss2 = subset(WinsLoss2, select = -c(1,4,5,6,9))
+
+```
+
+save files
+```{r}
+
+write.csv(WinsLoss, file = "~/Desktop/GraduateSchool/S3/Unstructured/HW3/WinsLoss.csv")
+write.csv(WinsLoss2, file = "~/Desktop/GraduateSchool/S3/Unstructured/HW3/WinsLoss2.csv")
+
+```
+
+
+###Analysis
+
+read files
+```{r}
+
+WinsLoss <- read.csv("~/Desktop/GraduateSchool/S3/Unstructured/HW3/WinsLoss.csv")
+WinsLoss2 <- read.csv("~/Desktop/GraduateSchool/S3/Unstructured/HW3/WinsLoss2.csv")
+WinsLoss2$X <- WinsLoss2$X + 1000 
+
+
+WrestlersAll <-  rbind(WinsLoss, WinsLoss2)
+```
+
+
+Fix this!!!!!!!!
+Prep Data
+```{r Scale Data}
+# Scale offensive data
+off_dat_2 <- scale(WrestlersAll[,4:9])
+# Add teams back to data frame
+off_dat <- cbind.data.frame(WrestlersAll$Gimmick, off_dat_2)
+# Fix name of team column
+names(off_dat)[1] <- "Wrestlers"
+```
+
+We are now ready to cluster our data. 
+
+```{r fit kmeans}
+set.seed(12345) # Set seed for reproducibility
+fit_1 <- kmeans(x = off_dat[,2:7], # Set data as explantory variables 
+                centers = 5,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+```
+
+```{r Extract results}
+# Extract clusters
+clusters_1 <- fit_1$cluster
+# Extract centers
+centers_1 <- fit_1$centers
+
+```
+
+how many samples have ended up in each cluster:
+
+```{r Check cluster numbers}
+# Check samples per cluster
+summary(as.factor(clusters_1))
+
+```
+
+Here we see that we have 22 samples in cluster 1, 3 in cluster 2, 27 in cluster 3, and 16 in cluster 4. We can view the teams in each cluster as follows:
+
+```{r Check teams per cluster, echo=FALSE}
+# Check teams in cluster 1
+cat("Cluster 1 teams:\n")
+off_dat$Wrestlers[clusters_1 == 1]
+# Check teams in cluster 2
+cat("Cluster 2 teams:\n")
+off_dat$Wrestlers[clusters_1 == 2]
+# Check teams in cluster 3
+cat("Cluster 3 teams:\n")
+off_dat$Wrestlers[clusters_1 == 3]
+# Check teams in cluster 4
+cat("Cluster 4 teams:\n")
+off_dat$Wrestlers[clusters_1 == 4]
+# Check teams in cluster 5
+cat("Cluster 5 teams:\n")
+off_dat$Wrestlers[clusters_1 == 5]
+```
+
+
+Lets check how the center values for each of the clusters compare to each other. To make this interpret-able lets just use the overall game level values:
+
+```{r}
+# Create vector of clusters
+cluster <- c(1: 5)
+# Extract centers
+center_df <- data.frame(cluster, centers_1)
+
+# Reshape the data
+center_reshape <- gather(center_df, features, values, Rating:Draw)
+# View first few rows
+head(center_reshape)
+
+# Create plot
+g_heat_1 <- ggplot(data = center_reshape, # Set dataset
+                   aes(x = features, y = cluster, fill = values)) + # Set aesthetics
+  scale_y_continuous(breaks = seq(1, 5, by = 1)) + # Set y axis breaks
+  geom_tile() + # Geom tile for heatmap
+  coord_equal() +  # Make scale the same for both axis
+  theme_set(theme_bw(base_size = 22) ) + # Set theme
+  scale_fill_gradient2(low = "blue",
+                       mid = "white",
+                       high = "red", 
+                       midpoint =0,
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip() # Rotate plot to view names clearly
+# Generate plot
+g_heat_1
+```
+
+
+```{r Check Cluster Number}
+# Create function to try different cluster numbers
+kmean_withinss <- function(k) {
+  cluster <- kmeans( x = off_dat[,2:7],  # Set data to use
+                    centers = k,  # Set number of clusters as k, changes with input into function
+                    nstart = 25, # Set number of starts
+                    iter.max = 100) # Set max number of iterations
+  return (cluster$tot.withinss) # Return cluster error/within cluster sum of squares
+}
+
+
+# Set maximum cluster number
+max_k <-20
+# Run algorithm over a range of cluster numbers 
+wss <- sapply(2:max_k, kmean_withinss)
+
+
+# Create a data frame to plot the graph
+elbow <-data.frame(2:max_k, wss)
+
+# Plot the graph with ggplot
+g_e1 <- ggplot(elbow, # Set dataset
+              aes(x = X2.max_k, y = wss)) + # Set aesthetics
+  theme_set(theme_bw(base_size = 22) ) + # Set theme
+  geom_point(color = "blue") + # Set geom point for scatter
+  geom_line() + # Geom line for a line between points
+  scale_x_continuous(breaks = seq(1, 20, by = 1)) + # Set breaks for x-axis
+  labs(x = "Number of Clusters", y="Within Cluster \nSum of Squares") + # Set labels
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+# Generate plot
+g_e1
+
+```
+
+This is a pretty tough plot to decide what cluster number to choose. Let's try 6 clusters and see what results we get: 
+
+```{r run kmeans 2}
+set.seed(12345) # Set seed for reproducibility
+fit_2 <- kmeans(x = off_dat[2:7], # Set data as explanatory variables 
+                centers = 6,  # Set number of clusters
+                nstart = 25, # Set number of starts
+                iter.max = 100 ) # Set maximum number of iterations to use
+
+# Extract clusters
+clusters_2 <- fit_2$cluster
+# Extract centers
+centers_2 <- fit_2$centers
+```
+
+```{r Check cluster numbers 2}
+# Check samples per cluster
+summary(as.factor(clusters_2))
+
+```
+
+## Checking Clustering Quality
+
+```{r Clustering Cardinality}
+
+plot_clust_cardinality <- cbind.data.frame(clusters_1, clusters_2) # Join clusters with  k =4 and k=6
+
+names(plot_clust_cardinality) <- c("k_4", "k_6") # Set names
+
+# Create bar plots
+g_2 <- ggplot(plot_clust_cardinality, aes( x = factor(k_4))) + # Set x as cluster values
+  geom_bar(stat = "count", fill = "steelblue") + # Use geom_bar with stat = "count" to count observations
+    labs(x = "Cluster Number", y="Points in Cluster", # Set labels
+         title = "Cluster Cardinality (k = 4)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+
+g_3 <- ggplot(plot_clust_cardinality, aes( x = factor(k_6))) + # Set x as cluster values
+  geom_bar(stat = "count", fill = "steelblue") + # Use geom_bar with stat = "count" to count observations
+    labs(x = "Cluster Number", y="Points in Cluster", # Set labels
+         title = "Cluster Cardinality (k = 6)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+# Generate bar plots
+g_2
+g_3
+```
+
+
+
+```{r Check Cluster Magnitude}
+
+k_4_mag <- cbind.data.frame(c(1:5), fit_1$withinss) # Extract within cluster sum of squares
+
+names(k_4_mag) <- c("cluster", "withinss") # Fix names for plot data
+
+
+# Create bar plot
+g_4 <- ggplot(k_4_mag, aes(x = cluster, y = withinss)) + # Set x as cluster, y as withinss
+  geom_bar(stat = "identity", fill = "steelblue") + # Use geom bar and stat = "identity" to plot values directly
+   labs(x = "Cluster Number", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude (k = 4)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+  
+k_6_mag <- cbind.data.frame(c(1:6), fit_2$withinss) # Extract within cluster sum of squares
+names(k_6_mag) <- c("cluster", "withinss") # Fix names for plot data
+
+# Create bar plot
+g_5 <- ggplot(k_6_mag, aes(x = cluster, y = withinss)) +  # Set x as cluster, y as withinss
+  geom_bar(stat = "identity", fill = "steelblue") + # Use geom bar and stat = "identity" to plot values directly
+   labs(x = "Cluster Number", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude (k = 6)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+# Generate plots
+g_4
+g_5
+```
+
+```{r Magnitude v Caardinality}
+k_4_dat <- cbind.data.frame(table(clusters_1), k_4_mag[,2]) # Join magnitude and cardinality
+
+names(k_4_dat) <- c("cluster", "cardinality", "magnitude") # Fix plot data names
+
+# Create scatter plot
+g_6 <- ggplot(k_4_dat, aes(x = cardinality, y = magnitude, color = cluster)) + # Set aesthetics
+  geom_point(alpha = 0.8, size  = 4) +  # Set geom point for scatter
+ geom_smooth(aes(x = cardinality, y = magnitude), method = "lm",
+              se = FALSE, inherit.aes = FALSE, alpha = 0.5) + # Set trend  line
+  labs(x = "Cluster Cardinality", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude vs Cardinality \n(k = 4)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+
+k_6_dat <- cbind.data.frame(table(clusters_2), k_6_mag[,2]) # Join magnitude and cardinality
+
+names(k_6_dat) <- c("cluster", "cardinality", "magnitude") # Fix plot data names
+
+# Create scatter plot
+g_7 <- ggplot(k_6_dat, aes(x = cardinality, y = magnitude, color = cluster)) + # Set aesthetics
+  geom_point(alpha = 0.8, size = 4) +  # Set geom point for scatter
+  geom_smooth(aes(x = cardinality, y = magnitude), method = "lm",
+              se = FALSE, inherit.aes = FALSE, alpha = 0.5) + # Set trend  line
+  labs(x = "Cluster Cardinality", y="Total Point to Centroid Distance", # Set labels
+         title = "Cluster Magnitude vs Cardinality \n(k = 6)") +
+  theme(panel.grid.major = element_blank(), # Turn of the background grid
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()) 
+
+# Generate scatter plots
+g_6
+g_7
+```
+```{r Cluster Heatmap}
+# Create vector of clusters
+cluster <- c(1: 6)
+# Extract centers
+center_df <- data.frame(cluster, centers_2)
+
+# Reshape the data
+center_reshape <- gather(center_df, features, values, Rating:Draw)
+# View first few rows
+head(center_reshape)
+
+# Create plot
+g_heat_1 <- ggplot(data = center_reshape, # Set dataset
+                   aes(x = features, y = cluster, fill = values)) + # Set aesthetics
+  scale_y_continuous(breaks = seq(1, 6, by = 1)) + # Set y axis breaks
+  geom_tile() + # Geom tile for heatmap
+  coord_equal() +  # Make scale the same for both axis
+  theme_set(theme_bw(base_size = 22) ) + # Set theme
+  scale_fill_gradient2(low = "blue",
+                       mid = "white",
+                       high = "red", 
+                       midpoint =0, 
+                       space = "Lab", 
+                       na.value ="grey",
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip() # Rotate plot to view names clearly
+# Generate plot
+g_heat_1
+```
+PAM Model
+
+```{r}
+fit_3 <- pam(x = off_dat[,2:7],  # Set data as explanatory variables
+             k = 6,                   # Set number of clusters
+             diss = FALSE) 
+
+# Extract clusters
+clusters_3 <- fit_3$cluster
+# Extract medoids
+medoids_3 <- fit_3$medoids
+
+print(fit_3)
+```
+
+
+```{r}
+# Create vector of clusters
+clusters_3 <- c(1: 6)
+# Extract centers
+medoids_df <- data.frame(clusters_3, medoids_3)
+
+# Reshape the data
+medoids_reshape <- gather(medoids_df, features, values, Rating:Draw)
+# View first few rows
+head(medoids_reshape)
+
+# Create plot
+g_heat_3 <- ggplot(data = medoids_reshape, # Set dataset
+                   aes(x = features, y = clusters_3, fill = values)) + # Set aesthetics
+  scale_y_continuous(breaks = seq(1, 6, by = 1)) + # Set y axis breaks
+  geom_tile() + # Geom tile for heatmap
+  coord_equal() +  # Make scale the same for both axis
+  theme_set(theme_bw(base_size = 22) ) + # Set theme
+  scale_fill_gradient2(low = "blue", # Choose low color
+                       mid = "white", # Choose mid color
+                       high = "red", # Choose high color
+                       midpoint =0, # Choose mid point
+                       space = "Lab", 
+                       na.value ="grey", # Choose NA value
+                       guide = "colourbar", # Set color bar
+                       aesthetics = "fill") + # Select aesthetics to apply
+  coord_flip() # Rotate plot to view names clearly
+# Generate plot
+g_heat_3
+
+```
+Finding Profile Character for each cluster
+```{r}
+
+Personas <- fit_3$id.med
+Personas <-as.data.frame(Personas)
+names(WrestlersAll)[which(names(WrestlersAll) == "X")] <- "ID"
+names(Personas)[which(names(Personas) == "Personas")] <- "ID"
+Personas$Cluster <- seq(1,6,1)
+
+
+Profile <- inner_join(WrestlersAll, Personas, by = "ID")
+
+Profile <- Profile %>%
+  arrange(Cluster)
+
+print(Profile)
+```
+
+
